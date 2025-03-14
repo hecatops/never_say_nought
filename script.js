@@ -92,33 +92,187 @@ function handleMove(boardIndex, cellIndex) {
 }
 
 function computerMove() {
-  let availableMoves = [];
+  // If game is over, don't make a move
+  if (gameOver) return;
+  
+  // Get all available moves in the active board or across all boards if no active board
+  let availableMoves = getAvailableMoves();
+  
+  if (availableMoves.length === 0) return;
+  
+  // Prioritize winning moves in the current small board
+  const winningMove = findWinningMove(availableMoves, PLAYER_O);
+  if (winningMove) {
+    makeMove(winningMove[0], winningMove[1], PLAYER_O);
+    return;
+  }
+  
+  // Block opponent's winning moves
+  const blockingMove = findWinningMove(availableMoves, PLAYER_X);
+  if (blockingMove) {
+    makeMove(blockingMove[0], blockingMove[1], PLAYER_O);
+    return;
+  }
+  
+  // Strategic move selection (using a simplified minimax approach)
+  const strategicMove = findStrategicMove(availableMoves);
+  makeMove(strategicMove[0], strategicMove[1], PLAYER_O);
+}
+
+function getAvailableMoves() {
+  let moves = [];
   
   if (activeBoardIndex !== null && mainBoard[activeBoardIndex].winner === null) {
+    // Get moves in the active board
     for (let j = 0; j < 9; j++) {
       if (mainBoard[activeBoardIndex].cells[j] === null) {
-        availableMoves.push([activeBoardIndex, j]);
+        moves.push([activeBoardIndex, j]);
       }
     }
   } else {
+    // Get moves from all available boards
     for (let i = 0; i < 9; i++) {
       if (mainBoard[i].winner === null) {
         for (let j = 0; j < 9; j++) {
           if (mainBoard[i].cells[j] === null) {
-            availableMoves.push([i, j]);
+            moves.push([i, j]);
           }
         }
       }
     }
   }
+  
+  return moves;
+}
 
-  if (availableMoves.length > 0) {
-    const [boardIndex, cellIndex] = availableMoves[Math.floor(Math.random() * availableMoves.length)];
-    mainBoard[boardIndex].cells[cellIndex] = PLAYER_O;
-    turnsPlayed++;
-    checkSmallBoardWinner(boardIndex);
-    activeBoardIndex = mainBoard[cellIndex].winner ? null : cellIndex;
+function findWinningMove(moves, player) {
+  // Check each move to see if it would result in winning a small board
+  for (const [boardIndex, cellIndex] of moves) {
+    // Create a temporary copy of the board
+    const boardCopy = [...mainBoard[boardIndex].cells];
+    boardCopy[cellIndex] = player;
+    
+    // Check if this move creates a win
+    if (hasWinningLine(boardCopy, player)) {
+      return [boardIndex, cellIndex];
+    }
   }
+  
+  return null;
+}
+
+function hasWinningLine(cells, player) {
+  const winningLines = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6]
+  ];
+  
+  for (const line of winningLines) {
+    const [a, b, c] = line;
+    if (cells[a] === player && cells[b] === player && cells[c] === player) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+function findStrategicMove(moves) {
+  // Score each possible move
+  const scoredMoves = moves.map(move => {
+    const [boardIndex, cellIndex] = move;
+    let score = 0;
+    
+    // Prefer center positions in small boards
+    if (cellIndex === 4) score += 3;
+    
+    // Prefer corners over edges in small boards
+    if ([0, 2, 6, 8].includes(cellIndex)) score += 2;
+    
+    // Consider the strategic value of the next board the opponent will be sent to
+    if (mainBoard[cellIndex].winner === null) {
+      // If we send opponent to a board that is almost full, that's good
+      const filledCells = mainBoard[cellIndex].cells.filter(cell => cell !== null).length;
+      score += filledCells * 0.5;
+      
+      // Avoid sending to a board where opponent could win
+      if (hasTwoInARow(mainBoard[cellIndex].cells, PLAYER_X)) {
+        score -= 10;
+      }
+    }
+    
+    // If move sends to an already won board, that's great (opponent must play anywhere)
+    if (mainBoard[cellIndex].winner !== null) {
+      score += 5;
+    }
+    
+    // Check if this move creates a fork (multiple winning opportunities)
+    const boardCopy = [...mainBoard[boardIndex].cells];
+    boardCopy[cellIndex] = PLAYER_O;
+    if (countWinningOpportunities(boardCopy, PLAYER_O) > 1) {
+      score += 20;
+    }
+    
+    return { move, score };
+  });
+  
+  // Sort by score and pick the best move
+  scoredMoves.sort((a, b) => b.score - a.score);
+  
+  // Add a small amount of randomness to the top 3 moves (if we have that many)
+  const topMoves = scoredMoves.slice(0, Math.min(3, scoredMoves.length));
+  const randomIndex = Math.floor(Math.random() * topMoves.length);
+  return topMoves[randomIndex].move;
+}
+
+function hasTwoInARow(cells, player) {
+  const winningLines = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6]
+  ];
+  
+  for (const line of winningLines) {
+    const [a, b, c] = line;
+    const playerCells = [cells[a], cells[b], cells[c]].filter(cell => cell === player).length;
+    const emptyCells = [cells[a], cells[b], cells[c]].filter(cell => cell === null).length;
+    
+    if (playerCells === 2 && emptyCells === 1) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+function countWinningOpportunities(cells, player) {
+  const winningLines = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6]
+  ];
+  
+  let count = 0;
+  
+  for (const line of winningLines) {
+    const [a, b, c] = line;
+    const playerCells = [cells[a], cells[b], cells[c]].filter(cell => cell === player).length;
+    const emptyCells = [cells[a], cells[b], cells[c]].filter(cell => cell === null).length;
+    
+    if (playerCells === 2 && emptyCells === 1) {
+      count++;
+    }
+  }
+  
+  return count;
+}
+
+function makeMove(boardIndex, cellIndex, player) {
+  mainBoard[boardIndex].cells[cellIndex] = player;
+  turnsPlayed++;
+  checkSmallBoardWinner(boardIndex);
+  activeBoardIndex = mainBoard[cellIndex].winner ? null : cellIndex;
 }
 
 function checkSmallBoardWinner(boardIndex) {
